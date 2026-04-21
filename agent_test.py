@@ -9,18 +9,18 @@ api_key = os.getenv("APP_LLM_KEY") or os.getenv("OPENAI_API_KEY")
 if api_key:
     os.environ["OPENAI_API_KEY"] = api_key
 
-# 2. 에이전트 설정 (큐레이션 능력 강화)
+# 2. 에이전트 설정 (큐레이션 능력 극대화)
 researcher = Agent(
-    role='서울 술문화 큐레이터',
-    goal='지역별로 와인바, 힙노포, 위스키바 등 상황에 맞는 최고의 술집을 선별한다.',
-    backstory='노포의 정겨움과 바의 세련됨을 모두 이해하는 전문가. 화장실 청결도와 소음까지 신경 쓰는 꼼꼼한 성격.',
+    role='서울 술문화 전문 큐레이터',
+    goal='지역별로 상황(데이트, 2차, 단체, 혼술)에 딱 맞는 최고의 술집과 노포를 선별한다.',
+    backstory='단순 맛집 검색을 넘어 장소의 조명, 소음, 화장실 청결도, 예약 편의성까지 분석하는 프로 큐레이터.',
     llm='gpt-4o-mini', 
     verbose=True,
     allow_delegation=False
 )
 
 def save_to_supabase(location, content):
-    """임시 테이블(place_import_tmp)에 저장"""
+    """임시 테이블(place_import_tmp)에 정제된 데이터 저장"""
     url = os.getenv("DB_URL")
     key = os.getenv("DB_KEY")
     if not url or not key: return
@@ -28,37 +28,45 @@ def save_to_supabase(location, content):
     try:
         supabase: Client = create_client(url, key)
         data = {
-            "name": f"{location} 상황별 술집 큐레이션",
+            "name": f"{location} 상황별 맞춤 큐레이션",
             "content": str(content),
             "category": "comprehensive_bar",
             "location": location,
             "created_at": datetime.now().isoformat()
         }
         supabase.table("place_import_tmp").insert(data).execute()
-        print(f"✅ {location} 데이터 저장 성공!")
+        print(f"✅ {location} 데이터 수집 및 저장 완료!")
     except Exception as e:
-        print(f"❌ {location} 저장 중 에러: {e}")
+        print(f"❌ {location} 저장 에러: {e}")
 
 if __name__ == "__main__":
-    # 마포 제외 정예 7개 지역
+    # 소희님이 선정한 서울 핵심 힙플레이스 7선
     locations = ["성수동", "을지로", "한남동", "이태원", "압구정", "연남동", "문래동"]
     
+    print(f"🚀 'judo' 에이전트 가동: 총 {len(locations)}개 지역 데이터 수집 시작...")
+    
     for loc in locations:
-        print(f"\n--- {loc} 큐레이션 작업 중 ---")
+        print(f"\n--- {loc} 지역 정밀 분석 중 ---")
         
-        # 💡 소희님이 제안하신 키워드들을 전략적으로 배치했습니다.
+        # 💡 데이트, 2차(단체), 혼술 키워드를 모두 녹인 핵심 지시사항
         task = Task(
             description=f"""
                 {loc} 지역에서 아래 3가지 테마에 맞는 술집을 각 1~2곳씩 추천해줘:
                 
-                1. 힙노포 & 전통주: 아재 감성이지만 '화장실은 깨끗하고' 분위기 힙한 노포나 전통주 맛집
-                2. 혼술 위스키/와인바: 너무 비싸지 않고 혼자 가도 눈치 안 보이는 조용한 바
-                3. 단체/모임 레스토랑: 6인 이상 가능하거나 룸이 있고, 부모님/청첩장 모임에 어울리는 세련된 곳
+                1. 데이트 & 여자친구: 조명이 예쁘고 분위기가 압도적이라 데이트하기 좋은 와인바 또는 다이닝
+                2. 2차 & 힙노포: 1차 후 가기 좋은 가벼운 안주 맛집, 혹은 6인 이상 단체가 가능한 깨끗한 힙노포
+                3. 조용한 혼술: 바 테이블 위주로 되어 있어 혼자 가도 눈치 안 보고 조용히 즐길 수 있는 바/주점
                 
-                각 장소별로 '상호명', '주종(와인/위스키/전통주 등)', '추천 이유', '소음 및 청결도(화장실 등)'를 포함해줘.
+                각 장소별로 아래 데이터를 '구조화'해서 반드시 포함해줘:
+                - 상호명 및 주요 주종 (와인/위스키/전통주 등)
+                - 추천 테마 (데이트, 2차, 노포, 혼술 중 선택)
+                - 비주얼 스타일 (인스타감성, 정통바, 현지노포 등)
+                - 예약/웨이팅 정보 (캐치테이블 가능 여부 등)
+                - 화장실 정보 (내부/외부 여부 및 청결도 체크)
+                - 추천 이유 (왜 해당 테마에 적합한지 상세 설명)
             """,
             agent=researcher,
-            expected_output=f"{loc} 상황별 전문 술집 리스트"
+            expected_output=f"{loc} 상황별 상세 술집 데이터셋 (데이트/2차/단체/혼술)"
         )
         
         crew = Crew(agents=[researcher], tasks=[task], verbose=True)
@@ -67,6 +75,6 @@ if __name__ == "__main__":
             result = crew.kickoff()
             save_to_supabase(loc, result)
         except Exception as e:
-            print(f"❌ {loc} 에러: {e}")
+            print(f"❌ {loc} 실행 실패: {e}")
 
-    print("\n✨ 모든 지역 수집 완료! 이제 진짜 힙한 데이터들이 쌓일 거예요.")
+    print("\n✨ 모든 지역 큐레이션 완료! 이제 DB에서 데이터를 확인해보세요, 소희님! 🍷")
