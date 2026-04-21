@@ -1,34 +1,29 @@
-name: 매주 맛집 업데이트
+name: Judo Place Curation Agent
 
 on:
-  schedule:
-    - cron: '0 0 * * 1' # 매주 월요일 00:00 (1주 텀)
-  workflow_dispatch:
+  workflow_dispatch:      # 수동 실행 버튼 활성화
 
 jobs:
-  update:
+  run-agent:
     runs-on: ubuntu-latest
-    # 💡 강제 전환 옵션을 삭제하여 충돌 경고를 없앱니다.
-    
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
-      
+
       - name: 파이썬 설정
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          
-      - name: 필수 라이브러리 설치
+
+      - name: 필수 패키지 설치
         run: |
-          pip install crewai langchain-openai python-dotenv requests supabase
-        
+          pip install crewai supabase
+
       - name: 에이전트 가동
         run: python agent_test.py
         env:
           APP_LLM_KEY: "${{ secrets.OPENAI_API_KEY }}"
-          NAVER_ID: "${{ secrets.NAVER_CLIENT_ID }}"
-          NAVER_SECRET: "${{ secrets.NAVER_CLIENT_SECRET }}"
+          # 👇 소희님 스크린샷 이름과 똑같이 맞췄어요!
           DB_URL: "${{ secrets.SUPABASE_URL }}"
           DB_KEY: "${{ secrets.SUPABASE_KEY }}"
           CREWAI_TELEMETRY_OPT_OUT: "true"
