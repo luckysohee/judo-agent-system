@@ -24,3 +24,5 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          OTEL_SDK_DISABLED: "true"
+          PYDEVD_DISABLE_FILE_VALIDATION: "1"
