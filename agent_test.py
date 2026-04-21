@@ -1,24 +1,33 @@
 import os
 import requests
 import sys
-import time # 💡 API 과부하 방지용
+import time
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import tool
 from supabase import create_client, Client
 
-# 1. 환경 변수 로드
+# 1. 환경 변수 로드 및 세척 (공백 제거가 핵심!)
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
-OPENAI_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-NAVER_ID = os.getenv("NAVER_CLIENT_ID")
-NAVER_SECRET = os.getenv("NAVER_CLIENT_SECRET")
+
+def get_clean_env(key):
+    val = os.getenv(key)
+    return val.strip().replace('"', '').replace("'", "") if val else None
+
+# 💡 키 앞뒤의 공백과 따옴표를 완전히 제거합니다.
+OPENAI_API_KEY = get_clean_env("OPENAI_API_KEY")
+if OPENAI_API_KEY:
+    os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+
+SUPABASE_URL = get_clean_env("SUPABASE_URL")
+SUPABASE_KEY = get_clean_env("SUPABASE_KEY")
+NAVER_ID = get_clean_env("NAVER_CLIENT_ID")
+NAVER_SECRET = get_clean_env("NAVER_CLIENT_SECRET")
 
 # 2. 네이버 검색 도구
 @tool("search_naver_blog")
 def search_naver_blog(query: str) -> str:
     """네이버 블로그 실시간 검색"""
-    url = f"https://openapi.naver.com/v1/search/blog.json?query={query}&display=10" # 검색량 살짝 조절
+    url = f"https://openapi.naver.com/v1/search/blog.json?query={query}&display=10"
     headers = {"X-Naver-Client-Id": NAVER_ID, "X-Naver-Client-Secret": NAVER_SECRET}
     try:
         response = requests.get(url, headers=headers)
@@ -49,8 +58,11 @@ analyst = Agent(
 
 def save_to_supabase(location, category, situation, content):
     try:
+        if not SUPABASE_URL or not SUPABASE_KEY:
+            print("❌ Supabase 설정이 누락되었습니다.")
+            return
+            
         supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-        # 스크린샷 컬럼명(name, category, address, curator_id, title, location, content) 일치 확인
         data = {
             "name": f"{location} {category}",
             "category": category,
@@ -58,24 +70,24 @@ def save_to_supabase(location, category, situation, content):
             "curator_id": "judo_ai",
             "title": f"[{location}] {situation} 큐레이션",
             "location": location,
-            "content": str(content)[:3000] # 💡 너무 길면 잘리도록 제한 (안정성)
+            "content": str(content)[:3000] 
         }
-        res = supabase.table("place_import_tmp").insert(data).execute()
-        print(f"✅ {location} 저장 성공!")
+        supabase.table("place_import_tmp").insert(data).execute()
+        print(f"✅ {location} {category} 저장 성공!")
     except Exception as e:
-        print(f"🔥 저장 실패 원인: {e}")
+        print(f"🔥 저장 실패: {e}")
 
 if __name__ == "__main__":
-    # 💡 테스트를 위해 지역을 3개로 먼저 줄여서 성공하는지 봅시다!
-    locations = ["성수동", "압구정", "문래"]
+    # 💡 우선 1개 지역만 테스트해서 뚫리는지 확인합시다!
+    locations = ["성수동"]
     plans = [
         {"cat": "노포/포차", "sit": "퇴근 후 노상 감성"},
-        {"cat": "위스키/전통주", "sit": "분위기 있는 혼술 및 모임"}
+        {"cat": "위스키/전통주", "sit": "분위기 있는 혼술"}
     ]
 
     for loc in locations:
         for plan in plans:
-            print(f"🚀 {loc} {plan['cat']} 분석 중...")
+            print(f"🚀 {loc} {plan['cat']} 분석 시작...")
             
             t1 = Task(
                 description=f"{loc} {plan['cat']} 중 {plan['sit']} 장소의 조명, 좌석, 화장실 정보를 검색해.",
@@ -93,8 +105,6 @@ if __name__ == "__main__":
             result = crew.kickoff()
             
             save_to_supabase(loc, plan['cat'], plan['sit'], result)
-            
-            # 💡 네이버 API 차단 방지를 위해 3초간 쉽니다.
-            time.sleep(3)
+            time.sleep(2)
 
-    print("✨ 모든 작업 완료!")
+    print("✨ 테스트 완료!")
