@@ -1,30 +1,30 @@
 name: Judo Place Curation Agent
 
 on:
-  workflow_dispatch:      # 수동 실행 버튼 활성화
+  workflow_dispatch:      # 수동 실행 버튼
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
     steps:
-      - name: 코드 체크아웃
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: 파이썬 설정
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 필수 패키지 설치
+      - name: Install Dependencies
         run: |
           pip install crewai supabase
 
-      - name: 에이전트 가동
-        run: python agent_test.py
+      - name: Run Agent
+        # 소희님의 Secrets 이름과 1:1로 매칭했습니다.
         env:
-          APP_LLM_KEY: "${{ secrets.OPENAI_API_KEY }}"
-          # 👇 소희님 스크린샷 이름과 똑같이 맞췄어요!
+          OPENAI_API_KEY: "${{ secrets.OPENAI_API_KEY }}"
           DB_URL: "${{ secrets.SUPABASE_URL }}"
           DB_KEY: "${{ secrets.SUPABASE_KEY }}"
           CREWAI_TELEMETRY_OPT_OUT: "true"
           PYTHONUNBUFFERED: "1"
+        run: python agent_test.py
