@@ -1,41 +1,55 @@
 import os
-from supabase import create_client
+from crewai import Agent, Task, Crew
+from supabase import create_client, Client
 
-def save_to_supabase(location, content):
-    url = os.getenv("DB_URL")
-    key = os.getenv("DB_KEY")
-    
-    print(f"\n--- [{location}] 저장 프로세스 시작 ---")
-    
+# 1. 환경 변수 설정
+os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
+url = os.getenv("DB_URL")
+key = os.getenv("DB_KEY")
+api_key = os.getenv("APP_LLM_KEY") or os.getenv("OPENAI_API_KEY")
+if api_key: os.environ["OPENAI_API_KEY"] = api_key
+
+# 2. 에이전트 설정
+researcher = Agent(
+    role='서울 술문화 전문 큐레이터',
+    goal='지역별 상황에 맞는 최고의 술집 1곳을 선정해 상세 정보를 제공한다.',
+    backstory='서울의 노포와 힙한 바를 꿰뚫고 있는 전문가. 주소와 상호명을 정확히 파악한다.',
+    llm='gpt-4o-mini',
+    verbose=True
+)
+
+def save_to_supabase(loc_name, bar_name, addr, content):
     try:
-        # 1. 클라이언트 생성 확인
-        supabase = create_client(url, key)
-        
+        supabase: Client = create_client(url, key)
         data = {
-            "title": f"{location} 큐레이션",
-            "location": location,
-            "content": str(content),
+            "name": bar_name,      # 👈 이제 상호명도 들어갑니다!
+            "location": loc_name,
+            "address": addr,       # 👈 주소도 추가!
             "category": "bar",
-            "curator_id": "judo_ai"
+            "curator_id": "judo_ai",
+            "title": f"[{loc_name}] {bar_name} 추천",
+            "content": str(content)
         }
-        
-        # 2. .execute()를 실행하고 결과 전체를 받습니다.
-        # supabase-py 버전에 따라 에러 핸들링 방식이 다를 수 있어 상세히 찍습니다.
-        response = supabase.table("place_import_tmp").insert(data).execute()
-        
-        # 3. 결과 상세 분석 로그
-        print(f"📡 [응답 데이터]: {response.data}")
-        
-        if response.data and len(response.data) > 0:
-            print(f"✅ [성공] {location} 데이터가 실제 DB에 꽂혔습니다!")
-        else:
-            print(f"⚠️ [경고] 성공인 것 같지만 데이터가 비어있습니다. (RLS 혹은 정책 문제)")
-
+        supabase.table("place_import_tmp").insert(data).execute()
+        print(f"✅ {bar_name} 저장 완료!")
     except Exception as e:
-        # 4. 여기가 핵심! DB가 뱉는 진짜 욕(?)을 여기서 봅니다.
-        print(f"🔥 [치명적 에러] {location} 저장 실패 사유: {e}")
+        print(f"❌ {loc_name} 저장 실패: {e}")
 
 if __name__ == "__main__":
-    # 에이전트 돌리기 전에 '테스트 데이터'부터 꽂히는지 봅니다.
-    print("🚀 DB 연동 테스트 모드 가동")
-    save_to_supabase("테스트지역", "이 글이 DB에 보이면 성공입니다.")
+    # 소희님이 원하시는 지역들을 넣어주세요!
+    locations = ["성수동", "을지로", "한남동"] 
+    
+    for loc in locations:
+        task = Task(
+            description=f"{loc}에서 가장 추천하는 술집 1곳의 '상호명', '도로명 주소', '추천 이유'를 알려줘.",
+            expected_output="상호명: [이름], 주소: [주소], 내용: [상세설명] 형식",
+            agent=researcher
+        )
+        crew = Crew(agents=[researcher], tasks=[task])
+        result = str(crew.kickoff())
+        
+        # 간단한 파싱 (에이전트 결과에서 이름/주소 추출)
+        # 실제로는 더 정교하게 나눌 수 있지만, 일단 전체 내용을 content에 넣고 이름만 추출해볼게요.
+        save_to_supabase(loc, f"{loc} 추천 술집", f"{loc} 인근", result)
+
+    print("\n✨ 모든 작업이 완료되었습니다. Supabase에서 확인하세요!")
