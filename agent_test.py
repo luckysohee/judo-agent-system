@@ -1,83 +1,72 @@
 import os
-import json
 from datetime import datetime
+from crewai import Agent, Task, Crew
+from supabase import create_client, Client
 
-# 1. 환경 변수 및 텔레메트리 설정
+# 1. 환경 변수 설정
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
-
-# 깃허브 시크릿(APP_LLM_KEY) 혹은 일반 환경변수에서 키 가져오기
 api_key = os.getenv("APP_LLM_KEY") or os.getenv("OPENAI_API_KEY")
 if api_key:
     os.environ["OPENAI_API_KEY"] = api_key
 
-from crewai import Agent, Task, Crew
-from supabase import create_client, Client
-
-# 2. 에이전트 설정
+# 2. 에이전트 설정 (큐레이션 능력 강화)
 researcher = Agent(
-    role='지역 핫플 수집가',
-    goal='성수동에서 조용한 와인바를 찾아 리스트를 만든다.',
-    backstory='장소 추천 및 데이터 수집 전문가.',
+    role='서울 술문화 큐레이터',
+    goal='지역별로 와인바, 힙노포, 위스키바 등 상황에 맞는 최고의 술집을 선별한다.',
+    backstory='노포의 정겨움과 바의 세련됨을 모두 이해하는 전문가. 화장실 청결도와 소음까지 신경 쓰는 꼼꼼한 성격.',
     llm='gpt-4o-mini', 
     verbose=True,
     allow_delegation=False
 )
 
-# 3. 작업 설정
-task1 = Task(
-    description="성수동에서 분위기가 조용한 와인바 3곳을 추천해줘. 상호명, 간단한 특징을 포함해서 리스트로 작성해.",
-    agent=researcher,
-    expected_output="상호명과 특징이 포함된 와인바 리스트"
-)
-
-# 4. 크루 설정
-judo_crew = Crew(
-    agents=[researcher],
-    tasks=[task1],
-    verbose=True
-)
-
-def save_to_supabase(content):
-    """임시 테이블(place_import_tmp)에 에이전트 결과 저장"""
+def save_to_supabase(location, content):
+    """임시 테이블(place_import_tmp)에 저장"""
     url = os.getenv("DB_URL")
     key = os.getenv("DB_KEY")
-    
-    if not url or not key:
-        print("⚠️ Supabase 설정(URL/Key)이 없어 저장을 건너뜁니다.")
-        return
+    if not url or not key: return
 
     try:
         supabase: Client = create_client(url, key)
-        
-        # 임시 테이블 저장용 데이터 구조
         data = {
-            "name": "성수동 조용한 와인바 추천",
+            "name": f"{location} 상황별 술집 큐레이션",
             "content": str(content),
-            "category": "wine_bar",
-            "location": "성수동",
+            "category": "comprehensive_bar",
+            "location": location,
             "created_at": datetime.now().isoformat()
         }
-        
-        # 지정하신 임시 테이블 'place_import_tmp'에 데이터 삽입
-        response = supabase.table("place_import_tmp").insert(data).execute()
-        print(f"✅ place_import_tmp 테이블에 저장 성공!")
-        
+        supabase.table("place_import_tmp").insert(data).execute()
+        print(f"✅ {location} 데이터 저장 성공!")
     except Exception as e:
-        print(f"❌ Supabase 저장 중 에러 발생: {e}")
+        print(f"❌ {location} 저장 중 에러: {e}")
 
 if __name__ == "__main__":
-    print("🚀 'judo' 임시 데이터 수집 시작...")
-    try:
-        # 에이전트 실행
-        result = judo_crew.kickoff()
+    # 마포 제외 정예 7개 지역
+    locations = ["성수동", "을지로", "한남동", "이태원", "압구정", "연남동", "문래동"]
+    
+    for loc in locations:
+        print(f"\n--- {loc} 큐레이션 작업 중 ---")
         
-        # 결과 출력 및 DB 저장
-        print("\n" + "="*30)
-        print("🔍 수집된 데이터:")
-        print(result)
-        print("="*30)
+        # 💡 소희님이 제안하신 키워드들을 전략적으로 배치했습니다.
+        task = Task(
+            description=f"""
+                {loc} 지역에서 아래 3가지 테마에 맞는 술집을 각 1~2곳씩 추천해줘:
+                
+                1. 힙노포 & 전통주: 아재 감성이지만 '화장실은 깨끗하고' 분위기 힙한 노포나 전통주 맛집
+                2. 혼술 위스키/와인바: 너무 비싸지 않고 혼자 가도 눈치 안 보이는 조용한 바
+                3. 단체/모임 레스토랑: 6인 이상 가능하거나 룸이 있고, 부모님/청첩장 모임에 어울리는 세련된 곳
+                
+                각 장소별로 '상호명', '주종(와인/위스키/전통주 등)', '추천 이유', '소음 및 청결도(화장실 등)'를 포함해줘.
+            """,
+            agent=researcher,
+            expected_output=f"{loc} 상황별 전문 술집 리스트"
+        )
         
-        save_to_supabase(result)
+        crew = Crew(agents=[researcher], tasks=[task], verbose=True)
         
-    except Exception as e:
-        print(f"❌ 실행 중 에러 발생: {e}")
+        try:
+            result = crew.kickoff()
+            save_to_supabase(loc, result)
+        except Exception as e:
+            print(f"❌ {loc} 에러: {e}")
+
+    print("\n✨ 모든 지역 수집 완료! 이제 진짜 힙한 데이터들이 쌓일 거예요.")
