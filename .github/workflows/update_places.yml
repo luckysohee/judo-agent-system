@@ -1,5 +1,5 @@
-cat <<EOF > .github/workflows/update_places.yml
 name: 2주마다 맛집 업데이트
+
 on:
   schedule:
     - cron: '0 0 1,15 * *'
@@ -19,9 +19,8 @@ jobs:
       - name: 에이전트 가동
         run: python agent_test.py
         env:
-          OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}
-          NAVER_CLIENT_ID: \${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: \${{ secrets.NAVER_CLIENT_SECRET }}
-          SUPABASE_URL: \${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: \${{ secrets.SUPABASE_KEY }}
-EOF
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
