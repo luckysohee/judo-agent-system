@@ -2,12 +2,16 @@ name: 2주마다 맛집 업데이트
 
 on:
   schedule:
-    - cron: '0 0 1,15 * *' # 매월 1일, 15일 자정에 실행
-  workflow_dispatch: # 수동 실행 버튼 활성화
+    - cron: '0 0 1,15 * *'
+  workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
+    env:
+      # 💡 깃허브 액션 노드 24 경고를 해결하는 설정입니다.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      
     steps:
       - name: 코드 체크아웃
         uses: actions/checkout@v4
@@ -22,15 +26,12 @@ jobs:
           pip install crewai langchain-openai python-dotenv requests supabase
         
       - name: 에이전트 가동
-        # env를 run 바로 아래에 배치하여 보안 필터링 우회를 시도합니다.
         run: python agent_test.py
         env:
-          # 변수명을 바꿔서 깃허브의 자동 마스킹(***)을 피합니다.
           APP_LLM_KEY: "${{ secrets.OPENAI_API_KEY }}"
           NAVER_ID: "${{ secrets.NAVER_CLIENT_ID }}"
           NAVER_SECRET: "${{ secrets.NAVER_CLIENT_SECRET }}"
           DB_URL: "${{ secrets.SUPABASE_URL }}"
           DB_KEY: "${{ secrets.SUPABASE_KEY }}"
           CREWAI_TELEMETRY_OPT_OUT: "true"
-          OTEL_SDK_DISABLED: "true"
           PYTHONUNBUFFERED: "1"
