@@ -4,11 +4,11 @@ import html
 import requests
 import httpx
 from urllib.parse import quote
-from datetime import datetime
 from openai import OpenAI
-from supabase import create_client
 
-print("=== JUDO FINAL PRODUCTION v2 ===")
+from recommendation.save_place_import_tmp import save_to_db
+
+print("=== JUDO FINAL PRODUCTION v3 ===")
 
 NAVER_ID = os.getenv("NAVER_CLIENT_ID")
 NAVER_SECRET = os.getenv("NAVER_CLIENT_SECRET")
@@ -16,8 +16,6 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 INPUT_CATEGORY = os.getenv("INPUT_CATEGORY", "").strip()
-
-TARGET_TABLE = "place_import_tmp"
 
 LOCATIONS = ["성수", "합정", "압구정", "을지로"]
 
@@ -42,6 +40,8 @@ def validate_env():
 
 
 def clean_text(text):
+    if not text:
+        return ""
     text = html.unescape(text)
     text = re.sub(r"<.*?>", "", text)
     text = re.sub(r"\s+", " ", text)
@@ -49,6 +49,7 @@ def clean_text(text):
 
 
 def is_ad(text):
+    text = text or ""
     return any(k in text for k in AD_KEYWORDS)
 
 
@@ -59,7 +60,10 @@ def extract_place_name(title):
 
     parts = title.split()
 
-    stopwords = ["성수", "합정", "압구정", "을지로", "맛집", "추천", "후기", "와인바", "노포"]
+    stopwords = [
+        "성수", "합정", "압구정", "을지로",
+        "맛집", "추천", "후기", "와인바", "노포", "술집"
+    ]
 
     filtered = [p for p in parts if p not in stopwords]
 
@@ -76,7 +80,7 @@ def get_naver_items(query):
         "X-Naver-Client-Secret": NAVER_SECRET,
     }
 
-    res = requests.get(url, headers=headers)
+    res = requests.get(url, headers=headers, timeout=15)
     res.raise_for_status()
 
     items = res.json().get("items", [])
@@ -106,10 +110,9 @@ def process_items(items, loc):
     result = []
 
     for item in items:
-        title = clean_text(item["title"])
-        desc = clean_text(item["description"])
-
-        text = title + " " + desc
+        title = clean_text(item.get("title", ""))
+        desc = clean_text(item.get("description", ""))
+        text = f"{title} {desc}"
 
         result.append({
             "title": title,
@@ -170,34 +173,19 @@ def get_gpt(loc, cat, raw):
         messages=[{"role": "user", "content": prompt}],
     )
 
-    return res.choices[0].message.content
+    return (res.choices[0].message.content or "").strip()
 
 
-def save_db(loc, cat, content, raw, items):
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+def persist_result(loc, cat, content, raw, selected_items):
+    print(f"[SAVE REQUEST] {loc} {cat}")
 
-    key = f"{loc}-{cat}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
-
-    places = [
-        {
-            "name": i["place_name"],
-            "score": i["score"]
-        }
-        for i in items
-    ]
-
-    data = {
-        "source_key": key,
-        "location": loc,
-        "category": cat,
-        "content": content,
-        "places": places,
-        "raw_data": raw
-    }
-
-    print("[DB INSERT]", key)
-
-    supabase.table(TARGET_TABLE).insert(data).execute()
+    save_to_db(
+        location=loc,
+        category=cat,
+        content=content,
+        selected_items=selected_items,
+        raw_data=raw,
+    )
 
 
 def run():
@@ -209,7 +197,6 @@ def run():
             print(f"{loc} {cat}")
 
             items = get_naver_items(f"{loc} {cat}")
-
             selected = process_items(items, loc)
 
             if len(selected) < 3:
@@ -217,10 +204,9 @@ def run():
                 continue
 
             raw = build_raw_data(selected)
-
             gpt = get_gpt(loc, cat, raw)
 
-            save_db(loc, cat, gpt, raw, selected)
+            persist_result(loc, cat, gpt, raw, selected)
 
 
 if __name__ == "__main__":
