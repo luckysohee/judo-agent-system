@@ -3,8 +3,11 @@ import re
 import html
 import requests
 from urllib.parse import quote
+from datetime import datetime
 from openai import OpenAI
 from supabase import create_client
+
+print("=== JUDO SCRIPT VERSION 2026-04-22 DEBUG FINAL ===")
 
 NAVER_ID = os.getenv("NAVER_CLIENT_ID")
 NAVER_SECRET = os.getenv("NAVER_CLIENT_SECRET")
@@ -14,7 +17,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 INPUT_CATEGORY = os.getenv("INPUT_CATEGORY", "").strip()
 
 TARGET_TABLE = "place_import_tmp"
-USE_UPSERT = True
 
 LOCATION_RULES = {
     "성수": {
@@ -55,19 +57,26 @@ LOCATION_RULES = {
 }
 
 def validate_env():
-    missing = []
-    for k, v in {
+    print("=== ENV CHECK START ===")
+    env_map = {
         "NAVER_CLIENT_ID": NAVER_ID,
         "NAVER_CLIENT_SECRET": NAVER_SECRET,
         "SUPABASE_URL": SUPABASE_URL,
         "SUPABASE_KEY": SUPABASE_KEY,
         "OPENAI_API_KEY": OPENAI_API_KEY,
-    }.items():
+    }
+
+    missing = []
+    for k, v in env_map.items():
+        print(f"{k}: {'OK' if v else 'MISSING'}")
         if not v:
             missing.append(k)
 
     if missing:
         raise ValueError(f"환경변수 누락: {', '.join(missing)}")
+
+    print("=== ENV CHECK END ===")
+
 
 def clean_html_text(text: str) -> str:
     if not text:
@@ -76,6 +85,7 @@ def clean_html_text(text: str) -> str:
     text = re.sub(r"<.*?>", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
 
 def score_item_by_location(text: str, target_loc: str) -> int:
     text = text.lower()
@@ -99,6 +109,7 @@ def score_item_by_location(text: str, target_loc: str) -> int:
 
     return score
 
+
 def get_naver_search_items(query: str, display: int = 10):
     encoded_query = quote(query)
     url = f"https://openapi.naver.com/v1/search/blog.json?query={encoded_query}&display={display}"
@@ -108,15 +119,20 @@ def get_naver_search_items(query: str, display: int = 10):
     }
 
     try:
+        print(f"[NAVER REQUEST] query={query}")
         res = requests.get(url, headers=headers, timeout=15)
-        print(f"[NAVER] query={query} status={res.status_code}")
+        print(f"[NAVER STATUS] {res.status_code}")
+        print(f"[NAVER BODY PREVIEW] {res.text[:300]}")
+
         res.raise_for_status()
         items = res.json().get("items", [])
-        print(f"[NAVER] query={query} results={len(items)}")
+        print(f"[NAVER RESULTS] query={query} count={len(items)}")
         return items
+
     except Exception as e:
         print(f"[NAVER ERROR] query={query} error={e}")
         return []
+
 
 def filter_items_by_location(items, target_loc: str, min_score: int = 1):
     scored = []
@@ -144,6 +160,7 @@ def filter_items_by_location(items, target_loc: str, min_score: int = 1):
 
     return filtered, scored
 
+
 def build_raw_data_for_gpt(filtered_items, limit: int = 5):
     selected = filtered_items[:limit]
     return "\n\n".join([
@@ -151,7 +168,10 @@ def build_raw_data_for_gpt(filtered_items, limit: int = 5):
         for item in selected
     ])
 
+
 def get_gpt_curation(location: str, category: str, raw_data: str):
+    print(f"[GPT START] {location} | {category}")
+
     client = OpenAI(api_key=OPENAI_API_KEY)
 
     prompt = f"""
@@ -184,52 +204,53 @@ def get_gpt_curation(location: str, category: str, raw_data: str):
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
         )
-        return response.choices[0].message.content.strip()
+        text = response.choices[0].message.content.strip()
+        print(f"[GPT OK] {location} | {category}")
+        print(text[:300])
+        return text
     except Exception as e:
         print(f"[GPT ERROR] {location} {category} -> {e}")
         return None
 
-def save_to_db(loc: str, cat: str, content: str, raw_data: str, picked_count: int):
-    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    source_key = f"naver_blog:{loc}:{cat}"
 
-    data = {
-        "source_key": source_key,
-        "name": f"{loc} {cat}",
-        "category": cat,
-        "address": f"{loc} 일대",
-        "curator_id": "judo_ai",
-        "title": f"[{loc}] {cat} 큐레이션",
-        "location": loc,
-        "content": content,
-        "raw_data": raw_data,
-        "picked_count": picked_count,
-    }
+def save_to_db(loc: str, cat: str, content: str, raw_data: str, picked_count: int):
+    print("=== save_to_db called ===")
 
     try:
-        if USE_UPSERT:
-            result = (
-                supabase.table(TARGET_TABLE)
-                .upsert(data, on_conflict="source_key")
-                .execute()
-            )
-        else:
-            result = (
-                supabase.table(TARGET_TABLE)
-                .insert(data)
-                .execute()
-            )
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+        run_date = datetime.utcnow().strftime("%Y-%m-%d")
+        source_key = f"naver_blog:{loc}:{cat}:{run_date}"
+
+        data = {
+            "source_key": source_key,
+            "name": f"{loc} {cat}",
+            "category": cat,
+            "address": f"{loc} 일대",
+            "curator_id": "judo_ai",
+            "title": f"[{loc}] {cat} 큐레이션",
+            "location": loc,
+            "content": content,
+            "raw_data": raw_data,
+            "picked_count": picked_count,
+        }
+
+        print("[DB DATA]")
+        print(data)
+
+        result = supabase.table(TARGET_TABLE).insert(data).execute()
 
         print(f"[DB OK] {loc} {cat}")
         print(result)
         return True
 
     except Exception as e:
-        print(f"[DB ERROR] {loc} {cat} -> {e}")
+        print(f"[DB ERROR] {loc} {cat} -> {type(e).__name__}: {e}")
         return False
 
+
 def process_location_category(loc: str, cat: str):
-    print("=" * 70)
+    print("=" * 80)
     print(f"START | {loc} | {cat}")
 
     items = get_naver_search_items(f"{loc} {cat}", display=10)
@@ -244,14 +265,13 @@ def process_location_category(loc: str, cat: str):
         print(f"score={row['score']} | {row['title']}")
 
     raw_data = build_raw_data_for_gpt(filtered_items, limit=5)
+    print(f"[RAW DATA PREVIEW] {raw_data[:500]}")
+
     curation_text = get_gpt_curation(loc, cat, raw_data)
 
     if not curation_text:
         print(f"[SKIP] {loc} {cat} GPT 결과 없음")
         return False
-
-    print(f"[CURATION] {loc} {cat}")
-    print(curation_text[:300])
 
     return save_to_db(
         loc=loc,
@@ -260,6 +280,7 @@ def process_location_category(loc: str, cat: str):
         raw_data=raw_data,
         picked_count=min(len(filtered_items), 5),
     )
+
 
 if __name__ == "__main__":
     validate_env()
@@ -288,5 +309,5 @@ if __name__ == "__main__":
                 print(f"[FATAL] {loc} {cat} -> {e}")
                 fail += 1
 
-    print("=" * 70)
+    print("=" * 80)
     print(f"DONE | total={total} success={success} fail={fail}")
