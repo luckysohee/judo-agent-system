@@ -53,4 +53,4 @@ jobs:
           PY
 
       - name: Run curation script
-        run: python scripts/judo_weekly_curation.py
+        run: python agent_test.py
